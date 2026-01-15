@@ -4,31 +4,12 @@ use std::time::{Duration, Instant};
 pub struct Word {
     pub text: String,
     pub orp_index: usize,
-    pub display_time: Duration,
 }
 
 impl Word {
-    pub fn new(text: String, wpm: u32) -> Self {
+    pub fn new(text: String) -> Self {
         let orp_index = Self::calculate_orp(&text);
-        let base_duration = Duration::from_secs_f32(60.0 / wpm as f32);
-
-        // Adjust display time based on word length and punctuation
-        let length_factor = 1.0 + (text.len() as f32 - 5.0) * 0.03;
-        let punctuation_factor = if text.contains(&['.', '!', '?', ';'][..]) {
-            1.4
-        } else if text.contains(',') {
-            1.15
-        } else {
-            1.0
-        };
-
-        let display_time = base_duration.mul_f32(length_factor.max(0.8) * punctuation_factor);
-
-        Self {
-            text,
-            orp_index,
-            display_time,
-        }
+        Self { text, orp_index }
     }
 
     fn calculate_orp(text: &str) -> usize {
@@ -72,7 +53,7 @@ impl RSVPEngine {
     pub fn new(text: &str, start_wpm: u32, target_wpm: u32, warmup_words: u32) -> Self {
         let words: Vec<Word> = text
             .split_whitespace()
-            .map(|w| Word::new(w.to_string(), start_wpm))
+            .map(|w| Word::new(w.to_string()))
             .collect();
 
         Self {
@@ -133,14 +114,6 @@ impl RSVPEngine {
     pub fn resume(&mut self) {
         self.is_paused = false;
         self.last_update = Instant::now();
-    }
-
-    pub fn toggle_pause(&mut self) {
-        if self.is_paused {
-            self.resume();
-        } else {
-            self.pause();
-        }
     }
 
     pub fn reset(&mut self) {

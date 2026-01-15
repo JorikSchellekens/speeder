@@ -12,7 +12,6 @@ mod hotkey {
 
     // Carbon types and constants
     type OSStatus = i32;
-    type EventHotKeyID = u32;
     type EventHotKeyRef = *mut c_void;
 
     // CoreGraphics types for simulating key events
@@ -342,7 +341,7 @@ impl eframe::App for SpeedReaderApp {
         }
         let word_parts = self.last_word.clone();
 
-        let (progress, current_wpm) = if let Some(engine) = &self.engine {
+        let (progress, _current_wpm) = if let Some(engine) = &self.engine {
             (engine.get_progress(), engine.get_current_wpm())
         } else {
             (0.0, 0)
