@@ -137,6 +137,7 @@ struct SpeedReaderApp {
     reading_active: bool,
     paused: bool,
     window_visible: bool,
+    last_word: Option<(String, char, String)>,
 }
 
 impl SpeedReaderApp {
@@ -147,7 +148,8 @@ impl SpeedReaderApp {
             trigger_flag,
             reading_active: false,
             paused: false,
-            window_visible: true, // Start visible, will hide on first update
+            window_visible: true,
+            last_word: None,
         }
     }
 
@@ -175,7 +177,7 @@ impl SpeedReaderApp {
         self.engine = None;
         self.reading_active = false;
         self.paused = false;
-        // Window visibility will be handled in update()
+        self.last_word = None;
         println!("Reading stopped, waiting for next trigger...");
     }
 }
@@ -265,14 +267,13 @@ impl eframe::App for SpeedReaderApp {
         let focus_color = egui::Color32::from_rgb(255, 100, 100);
 
         // Get word data and progress before UI rendering
-        let word_parts: Option<(String, char, String)> = if let Some(engine) = &mut self.engine {
-            engine.update().map(|w| {
-                let (before, focus, after) = w.get_parts();
-                (before, focus, after)
-            })
-        } else {
-            None
-        };
+        if let Some(engine) = &mut self.engine {
+            if let Some(word) = engine.update() {
+                let (before, focus, after) = word.get_parts();
+                self.last_word = Some((before, focus, after));
+            }
+        }
+        let word_parts = &self.last_word;
 
         let (progress, current_wpm) = if let Some(engine) = &self.engine {
             (engine.get_progress(), engine.get_current_wpm())
@@ -280,22 +281,53 @@ impl eframe::App for SpeedReaderApp {
             (0.0, 0)
         };
 
+        // Apply keyboard actions
+        if should_stop {
+            self.stop_reading(ctx);
+            return;
+        }
+
+        if should_toggle_pause {
+            if let Some(engine) = &mut self.engine {
+                self.paused = !self.paused;
+                if self.paused {
+                    engine.pause();
+                } else {
+                    engine.resume();
+                }
+            }
+        }
+
         // Main reading interface
         let paused = self.paused;
-        let response = egui::CentralPanel::default()
-            .frame(egui::Frame::none().fill(bg_color).inner_margin(20.0))
+        egui::CentralPanel::default()
+            .frame(egui::Frame::none())
             .show(ctx, |ui| {
-                let mut pause_clicked = false;
-                let mut stop_clicked = false;
+                let rect = ui.available_rect_before_wrap();
 
+                // Draw rounded background
+                ui.painter().rect_filled(
+                    rect,
+                    egui::Rounding::same(12.0),
+                    bg_color,
+                );
+
+                // Draw subtle border
+                ui.painter().rect_stroke(
+                    rect,
+                    egui::Rounding::same(12.0),
+                    egui::Stroke::new(1.0, border_color),
+                );
+
+                // Center the word display
                 ui.vertical_centered(|ui| {
-                    ui.add_space(20.0);
+                    ui.add_space((rect.height() - 50.0) / 2.0);
 
-                    if let Some((before, focus, after)) = &word_parts {
-                        let font_size = 40.0;
+                    if let Some((before, focus, after)) = word_parts {
+                        let font_size = 38.0;
 
                         ui.horizontal(|ui| {
-                            ui.add_space((ui.available_width() - 600.0).max(0.0) / 2.0);
+                            ui.add_space((ui.available_width() - 580.0).max(0.0) / 2.0);
 
                             ui.label(
                                 egui::RichText::new(format!("{:>12}", before))
@@ -320,61 +352,41 @@ impl eframe::App for SpeedReaderApp {
                             );
                         });
                     }
-
-                    ui.add_space(10.0);
-
-                    // Buttons for control
-                    ui.horizontal(|ui| {
-                        if ui.button(if paused { "▶ Resume" } else { "⏸ Pause" }).clicked() {
-                            println!("Pause button clicked!");
-                            pause_clicked = true;
-                        }
-                        if ui.button("✕ Stop").clicked() {
-                            println!("Stop button clicked!");
-                            stop_clicked = true;
-                        }
-                        ui.label(
-                            egui::RichText::new(format!("{} WPM", current_wpm))
-                                .size(12.0)
-                                .color(egui::Color32::GRAY),
-                        );
-                    });
-
-                    if paused {
-                        ui.add_space(5.0);
-                        ui.add(egui::ProgressBar::new(progress).desired_width(280.0));
-                    }
                 });
 
-                ctx.request_repaint();
-                (pause_clicked, stop_clicked)
+                // Slim progress bar at the bottom when paused
+                if paused {
+                    let bar_height = 3.0;
+                    let bar_margin = 16.0;
+                    let bar_y = rect.bottom() - bar_height - 12.0;
+                    let bar_width = rect.width() - (bar_margin * 2.0);
+
+                    // Background track
+                    let track_rect = egui::Rect::from_min_size(
+                        egui::pos2(rect.left() + bar_margin, bar_y),
+                        egui::vec2(bar_width, bar_height),
+                    );
+                    ui.painter().rect_filled(
+                        track_rect,
+                        egui::Rounding::same(1.5),
+                        egui::Color32::from_rgb(40, 40, 50),
+                    );
+
+                    // Progress fill
+                    let fill_rect = egui::Rect::from_min_size(
+                        egui::pos2(rect.left() + bar_margin, bar_y),
+                        egui::vec2(bar_width * progress, bar_height),
+                    );
+                    ui.painter().rect_filled(
+                        fill_rect,
+                        egui::Rounding::same(1.5),
+                        focus_color.linear_multiply(0.8),
+                    );
+                }
+
             });
 
-        // Handle button clicks
-        let (pause_clicked, stop_clicked) = response.inner;
-        if pause_clicked {
-            should_toggle_pause = true;
-        }
-        if stop_clicked {
-            should_stop = true;
-        }
-
-        // Apply button actions
-        if should_stop {
-            self.stop_reading(ctx);
-            return;
-        }
-
-        if should_toggle_pause {
-            if let Some(engine) = &mut self.engine {
-                self.paused = !self.paused;
-                if self.paused {
-                    engine.pause();
-                } else {
-                    engine.resume();
-                }
-            }
-        }
+        ctx.request_repaint();
     }
 }
 
