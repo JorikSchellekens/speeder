@@ -15,6 +15,48 @@ mod hotkey {
     type EventHotKeyID = u32;
     type EventHotKeyRef = *mut c_void;
 
+    // CoreGraphics types for simulating key events
+    type CGEventRef = *mut c_void;
+    type CGEventSourceRef = *mut c_void;
+    type CGEventFlags = u64;
+    type CGKeyCode = u16;
+
+    const K_CG_EVENT_FLAG_MASK_COMMAND: CGEventFlags = 0x00100000;
+    const K_CG_KEY_C: CGKeyCode = 8;
+
+    #[link(name = "CoreGraphics", kind = "framework")]
+    extern "C" {
+        fn CGEventCreateKeyboardEvent(
+            source: CGEventSourceRef,
+            virtual_key: CGKeyCode,
+            key_down: bool,
+        ) -> CGEventRef;
+        fn CGEventSetFlags(event: CGEventRef, flags: CGEventFlags);
+        fn CGEventPost(tap: u32, event: CGEventRef);
+        fn CFRelease(cf: *mut c_void);
+    }
+
+    /// Simulate Cmd+C to copy currently selected text
+    pub fn simulate_copy() {
+        unsafe {
+            // Create key down event for 'C'
+            let key_down = CGEventCreateKeyboardEvent(std::ptr::null_mut(), K_CG_KEY_C, true);
+            if !key_down.is_null() {
+                CGEventSetFlags(key_down, K_CG_EVENT_FLAG_MASK_COMMAND);
+                CGEventPost(0, key_down); // 0 = kCGHIDEventTap
+                CFRelease(key_down);
+            }
+
+            // Create key up event for 'C'
+            let key_up = CGEventCreateKeyboardEvent(std::ptr::null_mut(), K_CG_KEY_C, false);
+            if !key_up.is_null() {
+                CGEventSetFlags(key_up, K_CG_EVENT_FLAG_MASK_COMMAND);
+                CGEventPost(0, key_up);
+                CFRelease(key_up);
+            }
+        }
+    }
+
     const CMD_KEY: u32 = 1 << 8;  // cmdKey
     const CTRL_KEY: u32 = 1 << 12; // controlKey
     const K_VK_R: u32 = 15; // Virtual key code for 'R'
@@ -137,6 +179,9 @@ struct SpeedReaderApp {
     window_visible: bool,
     last_word: Option<(String, char, String)>,
     progress_visible_until: Option<std::time::Instant>,
+    // Remember position for same text
+    last_text: Option<String>,
+    last_position: usize,
 }
 
 impl SpeedReaderApp {
@@ -150,20 +195,40 @@ impl SpeedReaderApp {
             window_visible: true,
             last_word: None,
             progress_visible_until: None,
+            last_text: None,
+            last_position: 0,
         }
     }
 
     fn start_reading(&mut self, _ctx: &egui::Context) {
-        // Get clipboard content
+        // Simulate Cmd+C to copy any selected text
+        #[cfg(target_os = "macos")]
+        hotkey::simulate_copy();
+
+        // Wait for copy to complete
+        std::thread::sleep(Duration::from_millis(100));
+
+        // Get clipboard content (either newly copied selection or existing content)
         if let Ok(mut clipboard_ctx) = ClipboardContext::new() {
             if let Ok(text) = clipboard_ctx.get_contents() {
                 if !text.is_empty() {
-                    self.engine = Some(RSVPEngine::new(
+                    let mut engine = RSVPEngine::new(
                         &text,
                         self.config.speed.start_wpm,
                         self.config.speed.target_wpm,
                         self.config.speed.warmup_words,
-                    ));
+                    );
+
+                    // If same text as before, restore position
+                    if self.last_text.as_ref() == Some(&text) && self.last_position > 0 {
+                        engine.seek_to(self.last_position);
+                    } else {
+                        // New text - reset saved position
+                        self.last_text = Some(text);
+                        self.last_position = 0;
+                    }
+
+                    self.engine = Some(engine);
                     self.reading_active = true;
                 }
             }
@@ -171,6 +236,10 @@ impl SpeedReaderApp {
     }
 
     fn stop_reading(&mut self, _ctx: &egui::Context) {
+        // Save current position before stopping
+        if let Some(engine) = &self.engine {
+            self.last_position = engine.get_current_index();
+        }
         self.engine = None;
         self.reading_active = false;
         self.paused = false;
@@ -206,6 +275,7 @@ impl eframe::App for SpeedReaderApp {
         // Handle keyboard input - collect actions first, then apply
         let mut should_toggle_pause = false;
         let mut should_stop = false;
+        let mut should_restart = false;
         let mut speed_delta: i32 = 0;
 
         let mut seek_delta: i32 = 0;
@@ -215,6 +285,7 @@ impl eframe::App for SpeedReaderApp {
                     match key {
                         egui::Key::Space => should_toggle_pause = true,
                         egui::Key::Escape => should_stop = true,
+                        egui::Key::R => should_restart = true,
                         egui::Key::ArrowUp => speed_delta += 25,
                         egui::Key::ArrowDown => speed_delta -= 25,
                         egui::Key::ArrowLeft => seek_delta -= 1,
@@ -266,7 +337,7 @@ impl eframe::App for SpeedReaderApp {
                 self.last_word = Some((before, focus, after));
             }
         }
-        let word_parts = &self.last_word;
+        let word_parts = self.last_word.clone();
 
         let (progress, current_wpm) = if let Some(engine) = &self.engine {
             (engine.get_progress(), engine.get_current_wpm())
@@ -278,6 +349,14 @@ impl eframe::App for SpeedReaderApp {
         if should_stop {
             self.stop_reading(ctx);
             return;
+        }
+
+        if should_restart {
+            if let Some(engine) = &mut self.engine {
+                engine.reset();
+                self.last_position = 0;
+                self.last_word = None;
+            }
         }
 
         if should_toggle_pause {

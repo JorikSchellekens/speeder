@@ -161,6 +161,15 @@ impl RSVPEngine {
         self.last_update = Instant::now();
     }
 
+    pub fn seek_to(&mut self, index: usize) {
+        self.current_index = index.min(self.words.len().saturating_sub(1));
+        self.last_update = Instant::now();
+    }
+
+    pub fn get_current_index(&self) -> usize {
+        self.current_index
+    }
+
     pub fn get_current_word(&self) -> Option<&Word> {
         self.words.get(self.current_index)
     }
