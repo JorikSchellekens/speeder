@@ -189,4 +189,8 @@ impl RSVPEngine {
     pub fn get_current_wpm(&self) -> u32 {
         self.current_wpm
     }
+
+    pub fn get_target_wpm(&self) -> u32 {
+        self.target_wpm
+    }
 }

@@ -2,7 +2,7 @@
 
 set -e
 
-echo "Installing Speed Reader..."
+echo "Installing Speeder..."
 
 # Build the application
 echo "Building application..."
@@ -10,35 +10,36 @@ echo "Building application..."
 
 # Create symlink in /usr/local/bin for easy access
 echo "Creating command line shortcut..."
-sudo ln -sf "$(pwd)/target/release/speed-reader" /usr/local/bin/speed-reader
+sudo ln -sf "$(pwd)/target/release/speeder" /usr/local/bin/speeder
 
 # Create desktop entry for easy launching
-DESKTOP_FILE="$HOME/Desktop/SpeedReader.command"
+DESKTOP_FILE="$HOME/Desktop/Speeder.command"
 cat > "$DESKTOP_FILE" << EOF
 #!/bin/bash
 cd "$(pwd)"
-./target/release/speed-reader
+./target/release/speeder
 EOF
 chmod +x "$DESKTOP_FILE"
 
 echo ""
 echo "Installation complete!"
 echo ""
-echo "You can now run Speed Reader in several ways:"
-echo "  1. From terminal: speed-reader"
-echo "  2. Double-click SpeedReader.command on your Desktop"
-echo "  3. Run directly: ./target/release/speed-reader"
+echo "You can now run Speeder in several ways:"
+echo "  1. From terminal: speeder"
+echo "  2. Double-click Speeder.command on your Desktop"
+echo "  3. Run directly: ./target/release/speeder"
 echo ""
 echo "Usage:"
-echo "  - Copy text to clipboard"
-echo "  - Press Cmd+R to start reading"
+echo "  - Copy text to clipboard (or select text)"
+echo "  - Press Cmd+Control+R to start reading"
 echo "  - Press Space to pause/resume"
 echo "  - Press Up/Down arrows to adjust speed"
+echo "  - Press Left/Right arrows to navigate"
+echo "  - Press R to restart"
 echo "  - Press Escape to stop reading"
-echo "  - Press Q to quit application"
 echo ""
-echo "Configuration file: ~/Library/Application Support/speed-reader/config.toml"
+echo "Configuration file: ~/Library/Application Support/speeder/config.toml"
 echo ""
 echo "To uninstall:"
-echo "  sudo rm /usr/local/bin/speed-reader"
-echo "  rm ~/Desktop/SpeedReader.command"
+echo "  sudo rm /usr/local/bin/speeder"
+echo "  rm ~/Desktop/Speeder.command"

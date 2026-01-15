@@ -1,4 +1,4 @@
-# Speed Reader - RSVP System for macOS
+# Speeder - RSVP Speed Reader for macOS
 
 A Rust-based Rapid Serial Visual Presentation (RSVP) speed reading system with Optimal Recognition Point (ORP) for macOS.
 
@@ -6,18 +6,19 @@ A Rust-based Rapid Serial Visual Presentation (RSVP) speed reading system with O
 
 - **RSVP Display**: Shows one word at a time with optimal focus point
 - **ORP (Optimal Recognition Point)**: Calculates the best fixation point for each word
-- **Adaptive Speed**: Warm-up period from start speed to target speed
-- **Clipboard Integration**: Reads text from clipboard
-- **Visual Focus**: Black background with red focus letter at ORP
+- **Adaptive Speed**: Warm-up from 75% to target speed over configurable word count
+- **Selection/Clipboard Integration**: Reads selected text or clipboard content
+- **Visual Focus**: Dark background with red focus letter at ORP
+- **Position Memory**: Remembers position when reopening the same text
 - **Keyboard Controls**: Full control over reading experience
-- **Real-time Speed Adjustment**: Change reading speed on the fly
+- **Real-time Speed Adjustment**: Change reading speed on the fly (persisted)
 
 ## Installation
 
 ```bash
 # Clone the repository
 git clone <repository-url>
-cd speed-reader
+cd speeder
 
 # Quick install
 ./install.sh
@@ -28,41 +29,36 @@ cd speed-reader
 
 ## Configuration
 
-Configuration file: `~/Library/Application Support/speed-reader/config.toml`
+Configuration file: `~/Library/Application Support/speeder/config.toml`
 
 Default settings:
-- Start speed: 200 WPM
-- Target speed: 400 WPM
-- Warm-up time: 30 seconds
-- Font size: 48px
-
-Edit `config.toml` in the project directory to customize before first run.
+- Target speed: 400 WPM (warmup starts at 75%)
+- Warm-up words: 10
 
 ## Usage
 
 ### Starting the Application
 ```bash
 # Run from terminal
-speed-reader
+speeder
 
-# Or double-click SpeedReader.command on Desktop (after install)
+# Or double-click Speeder.command on Desktop (after install)
 # Or run directly
-./target/release/speed-reader
+./target/release/speeder
 ```
 
 ### Reading Workflow
-1. Copy any text to clipboard
-2. Press `Cmd+R` to start reading
+1. Select text in any app (or copy to clipboard)
+2. Press `Cmd+Control+R` to start reading
 3. Use controls below during reading
 
 ### Keyboard Controls
-- `Cmd+R`: Start reading clipboard text
+- `Cmd+Control+R`: Start reading selected/clipboard text
 - `Space`: Pause/Resume
-- `↑`: Increase speed by 10 WPM
-- `↓`: Decrease speed by 10 WPM
-- `R`: Restart current text
-- `Escape`: Stop reading current text
-- `Q`: Quit application
+- `Up/Down`: Adjust speed by 25 WPM
+- `Left/Right`: Navigate words
+- `R`: Restart from beginning
+- `Escape`: Stop reading
 
 ## How ORP Works
 
@@ -95,30 +91,26 @@ cargo clean
 
 ```bash
 # Remove command line shortcut
-sudo rm /usr/local/bin/speed-reader
+sudo rm /usr/local/bin/speeder
 
 # Remove desktop shortcut
-rm ~/Desktop/SpeedReader.command
+rm ~/Desktop/Speeder.command
 
 # Remove configuration
-rm -rf ~/Library/Application\ Support/speed-reader
-
-# Remove project directory (optional)
-rm -rf /path/to/speed-reader
+rm -rf ~/Library/Application\ Support/speeder
 ```
 
 ## Dependencies
 
-- macroquad: Cross-platform graphics and window management
+- eframe/egui: GUI framework
 - clipboard: Clipboard access
 - serde/toml: Configuration management
-- Standard Rust libraries for threading and synchronization
+- Carbon framework: Global hotkey registration
 
 ## Requirements
 
 - macOS 10.12 or later
 - Rust 1.70 or later
-- Cargo package manager
 
 ## License
 

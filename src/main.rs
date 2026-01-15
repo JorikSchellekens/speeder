@@ -214,7 +214,7 @@ impl SpeedReaderApp {
                 if !text.is_empty() {
                     let mut engine = RSVPEngine::new(
                         &text,
-                        self.config.speed.start_wpm,
+                        self.config.speed.start_wpm(),
                         self.config.speed.target_wpm,
                         self.config.speed.warmup_words,
                     );
@@ -313,6 +313,9 @@ impl eframe::App for SpeedReaderApp {
         if speed_delta != 0 {
             if let Some(engine) = &mut self.engine {
                 engine.adjust_speed(speed_delta);
+                // Persist the new target speed
+                self.config.speed.target_wpm = engine.get_target_wpm();
+                let _ = self.config.save();
             }
         }
 
@@ -477,7 +480,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
     // Load configuration
     let config = Config::load().unwrap_or_default();
 
-    println!("Speed Reader - Cmd+Control+R to start, ESC to stop");
+    println!("Speeder - Cmd+Control+R to start, ESC to stop");
 
     // Shared flag for hotkey trigger
     let trigger_flag = Arc::new(AtomicBool::new(false));
@@ -497,7 +500,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
     };
 
     eframe::run_native(
-        "Speed Reader",
+        "Speeder",
         options,
         Box::new(move |_cc| Ok(Box::new(SpeedReaderApp::new(trigger_flag, config)))),
     )?;

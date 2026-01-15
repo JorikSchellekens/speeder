@@ -12,9 +12,15 @@ pub struct Config {
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct SpeedConfig {
-    pub start_wpm: u32,
     pub target_wpm: u32,
     pub warmup_words: u32,  // Number of words to reach target speed
+}
+
+impl SpeedConfig {
+    /// Calculate start WPM as 75% of target for gradual warmup
+    pub fn start_wpm(&self) -> u32 {
+        (self.target_wpm as f32 * 0.75) as u32
+    }
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -36,7 +42,6 @@ impl Default for Config {
     fn default() -> Self {
         Self {
             speed: SpeedConfig {
-                start_wpm: 300,
                 target_wpm: 400,
                 warmup_words: 10,  // Reach full speed after 10 words
             },
@@ -71,10 +76,17 @@ impl Config {
         Ok(config)
     }
 
+    pub fn save(&self) -> Result<()> {
+        let config_path = Self::config_path()?;
+        let toml = toml::to_string_pretty(self)?;
+        fs::write(&config_path, toml)?;
+        Ok(())
+    }
+
     fn config_path() -> Result<PathBuf> {
         let config_dir = dirs::config_dir()
             .ok_or_else(|| anyhow::anyhow!("Could not find config directory"))?;
-        let app_dir = config_dir.join("speed-reader");
+        let app_dir = config_dir.join("speeder");
 
         if !app_dir.exists() {
             fs::create_dir_all(&app_dir)?;
