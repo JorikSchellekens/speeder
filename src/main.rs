@@ -136,7 +136,7 @@ struct SpeedReaderApp {
     paused: bool,
     window_visible: bool,
     last_word: Option<(String, char, String)>,
-    show_progress: bool,
+    progress_visible_until: Option<std::time::Instant>,
 }
 
 impl SpeedReaderApp {
@@ -149,7 +149,7 @@ impl SpeedReaderApp {
             paused: false,
             window_visible: true,
             last_word: None,
-            show_progress: false,
+            progress_visible_until: None,
         }
     }
 
@@ -175,7 +175,7 @@ impl SpeedReaderApp {
         self.reading_active = false;
         self.paused = false;
         self.last_word = None;
-        self.show_progress = false;
+        self.progress_visible_until = None;
     }
 }
 
@@ -225,7 +225,7 @@ impl eframe::App for SpeedReaderApp {
             }
         });
 
-        // Apply seek and show progress bar
+        // Apply seek and show progress bar for 1 second
         if seek_delta != 0 {
             if let Some(engine) = &mut self.engine {
                 engine.seek(seek_delta);
@@ -234,7 +234,7 @@ impl eframe::App for SpeedReaderApp {
                     let (before, focus, after) = word.get_parts();
                     self.last_word = Some((before, focus, after));
                 }
-                self.show_progress = true;
+                self.progress_visible_until = Some(std::time::Instant::now() + Duration::from_secs(1));
             }
         }
 
@@ -287,7 +287,7 @@ impl eframe::App for SpeedReaderApp {
                     engine.pause();
                 } else {
                     engine.resume();
-                    self.show_progress = false;  // Hide progress bar on resume
+                    self.progress_visible_until = None;
                 }
             }
         }
@@ -355,8 +355,8 @@ impl eframe::App for SpeedReaderApp {
                     }
                 });
 
-                // Slim progress bar at the bottom when paused or scrolling
-                let show_bar = paused || self.show_progress;
+                // Slim progress bar at the bottom when paused or recently scrolled
+                let show_bar = paused || self.progress_visible_until.map(|t| std::time::Instant::now() < t).unwrap_or(false);
                 if show_bar {
                     let bar_height = 2.0;
                     let bar_margin = 12.0;
