@@ -14,7 +14,7 @@ pub struct Config {
 pub struct SpeedConfig {
     pub start_wpm: u32,
     pub target_wpm: u32,
-    pub warmup_seconds: f32,
+    pub warmup_words: u32,  // Number of words to reach target speed
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -37,8 +37,8 @@ impl Default for Config {
         Self {
             speed: SpeedConfig {
                 start_wpm: 300,
-                target_wpm: 500,
-                warmup_seconds: 15.0,
+                target_wpm: 400,
+                warmup_words: 10,  // Reach full speed after 10 words
             },
             display: DisplayConfig {
                 font_size: 48.0,

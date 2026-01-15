@@ -136,6 +136,7 @@ struct SpeedReaderApp {
     paused: bool,
     window_visible: bool,
     last_word: Option<(String, char, String)>,
+    show_progress: bool,
 }
 
 impl SpeedReaderApp {
@@ -148,6 +149,7 @@ impl SpeedReaderApp {
             paused: false,
             window_visible: true,
             last_word: None,
+            show_progress: false,
         }
     }
 
@@ -160,7 +162,7 @@ impl SpeedReaderApp {
                         &text,
                         self.config.speed.start_wpm,
                         self.config.speed.target_wpm,
-                        self.config.speed.warmup_seconds,
+                        self.config.speed.warmup_words,
                     ));
                     self.reading_active = true;
                 }
@@ -173,6 +175,7 @@ impl SpeedReaderApp {
         self.reading_active = false;
         self.paused = false;
         self.last_word = None;
+        self.show_progress = false;
     }
 }
 
@@ -205,19 +208,35 @@ impl eframe::App for SpeedReaderApp {
         let mut should_stop = false;
         let mut speed_delta: i32 = 0;
 
+        let mut seek_delta: i32 = 0;
         ctx.input(|i| {
             for event in &i.events {
                 if let egui::Event::Key { key, pressed: true, .. } = event {
                     match key {
                         egui::Key::Space => should_toggle_pause = true,
                         egui::Key::Escape => should_stop = true,
-                        egui::Key::ArrowUp => speed_delta += 50,
-                        egui::Key::ArrowDown => speed_delta -= 50,
+                        egui::Key::ArrowUp => speed_delta += 25,
+                        egui::Key::ArrowDown => speed_delta -= 25,
+                        egui::Key::ArrowLeft => seek_delta -= 1,
+                        egui::Key::ArrowRight => seek_delta += 1,
                         _ => {}
                     }
                 }
             }
         });
+
+        // Apply seek and show progress bar
+        if seek_delta != 0 {
+            if let Some(engine) = &mut self.engine {
+                engine.seek(seek_delta);
+                // Update displayed word after seek
+                if let Some(word) = engine.get_current_word() {
+                    let (before, focus, after) = word.get_parts();
+                    self.last_word = Some((before, focus, after));
+                }
+                self.show_progress = true;
+            }
+        }
 
         // Apply speed changes from keyboard
         if speed_delta != 0 {
@@ -268,14 +287,22 @@ impl eframe::App for SpeedReaderApp {
                     engine.pause();
                 } else {
                     engine.resume();
+                    self.show_progress = false;  // Hide progress bar on resume
                 }
             }
         }
 
+        // Make egui background fully transparent
+        ctx.set_visuals(egui::Visuals {
+            window_fill: egui::Color32::TRANSPARENT,
+            panel_fill: egui::Color32::TRANSPARENT,
+            ..egui::Visuals::dark()
+        });
+
         // Main reading interface
         let paused = self.paused;
         egui::CentralPanel::default()
-            .frame(egui::Frame::none())
+            .frame(egui::Frame::none().fill(egui::Color32::TRANSPARENT))
             .show(ctx, |ui| {
                 let rect = ui.available_rect_before_wrap();
 
@@ -295,10 +322,10 @@ impl eframe::App for SpeedReaderApp {
 
                 // Center the word display
                 ui.vertical_centered(|ui| {
-                    ui.add_space((rect.height() - 50.0) / 2.0);
+                    ui.add_space((rect.height() - 45.0) / 2.0);
 
                     if let Some((before, focus, after)) = word_parts {
-                        let font_size = 38.0;
+                        let font_size = 34.0;
 
                         ui.horizontal(|ui| {
                             ui.add_space((ui.available_width() - 580.0).max(0.0) / 2.0);
@@ -328,11 +355,12 @@ impl eframe::App for SpeedReaderApp {
                     }
                 });
 
-                // Slim progress bar at the bottom when paused
-                if paused {
-                    let bar_height = 3.0;
-                    let bar_margin = 16.0;
-                    let bar_y = rect.bottom() - bar_height - 12.0;
+                // Slim progress bar at the bottom when paused or scrolling
+                let show_bar = paused || self.show_progress;
+                if show_bar {
+                    let bar_height = 2.0;
+                    let bar_margin = 12.0;
+                    let bar_y = rect.bottom() - bar_height - 8.0;
                     let bar_width = rect.width() - (bar_margin * 2.0);
 
                     // Background track
@@ -379,10 +407,10 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
     #[cfg(target_os = "macos")]
     hotkey::setup_global_hotkey(Arc::clone(&trigger_flag));
 
-    // Run the GUI app
+    // Run the GUI app with transparent background
     let options = eframe::NativeOptions {
         viewport: egui::ViewportBuilder::default()
-            .with_inner_size([700.0, 160.0])
+            .with_inner_size([700.0, 90.0])
             .with_decorations(false)
             .with_transparent(true)
             .with_always_on_top(),
