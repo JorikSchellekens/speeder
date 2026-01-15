@@ -176,6 +176,7 @@ struct SpeedReaderApp {
     reading_active: bool,
     paused: bool,
     window_visible: bool,
+    had_focus: bool, // Track if window ever gained focus (to detect focus *loss*)
     last_word: Option<(String, char, String)>,
     progress_visible_until: Option<std::time::Instant>,
     // Remember position for same text
@@ -192,6 +193,7 @@ impl SpeedReaderApp {
             reading_active: false,
             paused: false,
             window_visible: true,
+            had_focus: false,
             last_word: None,
             progress_visible_until: None,
             last_text: None,
@@ -229,6 +231,7 @@ impl SpeedReaderApp {
 
                     self.engine = Some(engine);
                     self.reading_active = true;
+                    self.had_focus = false; // Reset so we wait for focus before detecting loss
                 }
             }
         }
@@ -252,6 +255,16 @@ impl eframe::App for SpeedReaderApp {
         // Check for trigger from hotkey listener
         if self.trigger_flag.swap(false, Ordering::Relaxed) && !self.reading_active {
             self.start_reading(ctx);
+        }
+
+        // Track focus state for ephemeral window behavior
+        let has_focus = ctx.input(|i| i.focused);
+        if has_focus {
+            self.had_focus = true;
+        }
+        // Only close when focus is *lost* (not when never gained)
+        if self.reading_active && self.had_focus && !has_focus {
+            self.stop_reading(ctx);
         }
 
         // If not reading, hide window and wait for hotkey
