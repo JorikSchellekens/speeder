@@ -67,7 +67,6 @@ mod hotkey {
     ) -> OSStatus {
         unsafe {
             if let Some(ref trigger) = TRIGGER_FLAG {
-                println!("Hotkey detected: Cmd+Control+R");
                 trigger.store(true, Ordering::Relaxed);
             }
         }
@@ -94,7 +93,7 @@ mod hotkey {
             );
 
             if status != 0 {
-                println!("Failed to install event handler: {}", status);
+                eprintln!("Failed to install event handler: {}", status);
                 return false;
             }
 
@@ -114,11 +113,10 @@ mod hotkey {
             );
 
             if status != 0 {
-                println!("Failed to register hotkey: {}", status);
+                eprintln!("Failed to register hotkey: {}", status);
                 return false;
             }
 
-            println!("Global hotkey Cmd+Control+R registered successfully");
             true
         }
     }
@@ -165,9 +163,6 @@ impl SpeedReaderApp {
                         self.config.speed.warmup_seconds,
                     ));
                     self.reading_active = true;
-                    // Window visibility will be handled in update()
-
-                    println!("Started reading {} words", text.split_whitespace().count());
                 }
             }
         }
@@ -178,7 +173,6 @@ impl SpeedReaderApp {
         self.reading_active = false;
         self.paused = false;
         self.last_word = None;
-        println!("Reading stopped, waiting for next trigger...");
     }
 }
 
@@ -186,7 +180,6 @@ impl eframe::App for SpeedReaderApp {
     fn update(&mut self, ctx: &egui::Context, _frame: &mut eframe::Frame) {
         // Check for trigger from hotkey listener
         if self.trigger_flag.swap(false, Ordering::Relaxed) && !self.reading_active {
-            println!("Hotkey trigger received, starting reading...");
             self.start_reading(ctx);
         }
 
@@ -213,32 +206,13 @@ impl eframe::App for SpeedReaderApp {
         let mut speed_delta: i32 = 0;
 
         ctx.input(|i| {
-            // Debug: print all events
-            if !i.events.is_empty() {
-                println!("Events received: {:?}", i.events);
-            }
-
-            // Check all keys that were pressed this frame
             for event in &i.events {
                 if let egui::Event::Key { key, pressed: true, .. } = event {
-                    println!("Key event: {:?}", key);
                     match key {
-                        egui::Key::Space => {
-                            println!("Space pressed!");
-                            should_toggle_pause = true;
-                        }
-                        egui::Key::Escape => {
-                            println!("Escape pressed!");
-                            should_stop = true;
-                        }
-                        egui::Key::ArrowUp => {
-                            println!("Arrow up pressed!");
-                            speed_delta += 50;
-                        }
-                        egui::Key::ArrowDown => {
-                            println!("Arrow down pressed!");
-                            speed_delta -= 50;
-                        }
+                        egui::Key::Space => should_toggle_pause = true,
+                        egui::Key::Escape => should_stop = true,
+                        egui::Key::ArrowUp => speed_delta += 50,
+                        egui::Key::ArrowDown => speed_delta -= 50,
                         _ => {}
                     }
                 }
@@ -396,13 +370,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
     // Load configuration
     let config = Config::load().unwrap_or_default();
 
-    println!("Speed Reader running in background");
-    println!("Global hotkey: Cmd+Control+R to read clipboard text");
-    println!("");
-    println!("Controls during reading:");
-    println!("  Space: Pause/Resume");
-    println!("  Up/Down: Adjust speed");
-    println!("  ESC: Stop reading");
+    println!("Speed Reader - Cmd+Control+R to start, ESC to stop");
 
     // Shared flag for hotkey trigger
     let trigger_flag = Arc::new(AtomicBool::new(false));
