@@ -1,0 +1,28 @@
+# Speed Reader Configuration
+
+# Reading speed settings
+[speed]
+# Starting words per minute
+start_wpm = 200
+# Target words per minute
+target_wpm = 400
+# Time in seconds to warm up from start to target speed
+warmup_seconds = 30
+
+# Display settings
+[display]
+# Font size in pixels
+font_size = 48
+# ORP (Optimal Recognition Point) position
+# Percentage from start of word (0.0 to 1.0)
+orp_position = 0.33
+
+# Keybindings
+[hotkeys]
+# Modifier keys: cmd, ctrl, alt, shift
+# Key: any letter or function key
+start_reading = ["cmd", "shift", "r"]
+pause_resume = ["space"]
+speed_up = ["up"]
+speed_down = ["down"]
+quit = ["escape"]

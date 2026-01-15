@@ -1,0 +1,32 @@
+[package]
+name = "speed-reader"
+version = "0.1.0"
+edition = "2021"
+
+[dependencies]
+# macOS native APIs for global hotkey
+cocoa = "0.26"
+objc = "0.2"
+block = "0.1"
+
+# Window and UI (using wgpu backend instead of OpenGL to avoid threading issues)
+eframe = { version = "0.29", default-features = false, features = ["default_fonts", "wgpu"] }
+egui = "0.29"
+
+# System integration
+clipboard = "0.5"
+
+# Configuration
+serde = { version = "1.0", features = ["derive"] }
+serde_json = "1.0"
+toml = "0.8"
+
+# Utilities
+dirs = "5.0"
+anyhow = "1.0"
+log = "0.4"
+env_logger = "0.11"
+
+[[bin]]
+name = "speed-reader"
+path = "src/main.rs"
