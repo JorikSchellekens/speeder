@@ -5,49 +5,121 @@ use std::sync::Arc;
 use std::time::Duration;
 
 #[cfg(target_os = "macos")]
-#[allow(deprecated)]
 mod hotkey {
-    use cocoa::base::{id, nil};
-    use objc::{class, msg_send, sel, sel_impl};
     use std::sync::atomic::{AtomicBool, Ordering};
     use std::sync::Arc;
+    use std::os::raw::c_void;
 
-    // NSEventMask for key down events
-    const NS_KEY_DOWN_MASK: u64 = 1 << 10;
-    // Modifier flags
-    const NS_COMMAND_KEY_MASK: u64 = 1 << 20;
-    const NS_CONTROL_KEY_MASK: u64 = 1 << 18;
+    // Carbon types and constants
+    type OSStatus = i32;
+    type EventHotKeyID = u32;
+    type EventHotKeyRef = *mut c_void;
 
-    pub fn setup_global_monitor(trigger: Arc<AtomicBool>) -> id {
+    const CMD_KEY: u32 = 1 << 8;  // cmdKey
+    const CTRL_KEY: u32 = 1 << 12; // controlKey
+    const K_VK_R: u32 = 15; // Virtual key code for 'R'
+
+    #[repr(C)]
+    struct EventTypeSpec {
+        event_class: u32,
+        event_kind: u32,
+    }
+
+    // Carbon event constants
+    const K_EVENT_CLASS_KEYBOARD: u32 = 0x6b657962; // 'keyb'
+    const K_EVENT_HOT_KEY_PRESSED: u32 = 5;
+
+    #[repr(C)]
+    struct HotKeyID {
+        signature: u32,
+        id: u32,
+    }
+
+    #[link(name = "Carbon", kind = "framework")]
+    extern "C" {
+        fn RegisterEventHotKey(
+            key_code: u32,
+            modifiers: u32,
+            hot_key_id: HotKeyID,
+            target: *mut c_void,
+            options: u32,
+            out_ref: *mut EventHotKeyRef,
+        ) -> OSStatus;
+
+        fn GetEventDispatcherTarget() -> *mut c_void;
+
+        fn InstallEventHandler(
+            target: *mut c_void,
+            handler: extern "C" fn(*mut c_void, *mut c_void, *mut c_void) -> OSStatus,
+            num_types: u32,
+            list: *const EventTypeSpec,
+            user_data: *mut c_void,
+            out_ref: *mut *mut c_void,
+        ) -> OSStatus;
+    }
+
+    static mut TRIGGER_FLAG: Option<Arc<AtomicBool>> = None;
+
+    extern "C" fn hotkey_handler(
+        _next_handler: *mut c_void,
+        _event: *mut c_void,
+        _user_data: *mut c_void,
+    ) -> OSStatus {
         unsafe {
-            let block = block::ConcreteBlock::new(move |event: id| {
-                let flags: u64 = msg_send![event, modifierFlags];
-                let has_cmd = (flags & NS_COMMAND_KEY_MASK) != 0;
-                let has_ctrl = (flags & NS_CONTROL_KEY_MASK) != 0;
+            if let Some(ref trigger) = TRIGGER_FLAG {
+                println!("Hotkey detected: Cmd+Control+R");
+                trigger.store(true, Ordering::Relaxed);
+            }
+        }
+        0 // noErr
+    }
 
-                if has_cmd && has_ctrl {
-                    let chars: id = msg_send![event, charactersIgnoringModifiers];
-                    if chars != nil {
-                        let c_str: *const i8 = msg_send![chars, UTF8String];
-                        if !c_str.is_null() {
-                            let s = std::ffi::CStr::from_ptr(c_str).to_string_lossy();
-                            if s.to_lowercase() == "r" {
-                                println!("Hotkey detected: Cmd+Control+R");
-                                trigger.store(true, Ordering::Relaxed);
-                            }
-                        }
-                    }
-                }
-            });
-            let block = block.copy();
+    pub fn setup_global_hotkey(trigger: Arc<AtomicBool>) -> bool {
+        unsafe {
+            TRIGGER_FLAG = Some(trigger);
 
-            let cls = class!(NSEvent);
-            let monitor: id = msg_send![cls, addGlobalMonitorForEventsMatchingMask:NS_KEY_DOWN_MASK handler:&*block];
+            let event_type = EventTypeSpec {
+                event_class: K_EVENT_CLASS_KEYBOARD,
+                event_kind: K_EVENT_HOT_KEY_PRESSED,
+            };
 
-            // Keep the block alive
-            std::mem::forget(block);
+            let mut handler_ref: *mut c_void = std::ptr::null_mut();
+            let status = InstallEventHandler(
+                GetEventDispatcherTarget(),
+                hotkey_handler,
+                1,
+                &event_type,
+                std::ptr::null_mut(),
+                &mut handler_ref,
+            );
 
-            monitor
+            if status != 0 {
+                println!("Failed to install event handler: {}", status);
+                return false;
+            }
+
+            let hot_key_id = HotKeyID {
+                signature: 0x53504452, // 'SPDR'
+                id: 1,
+            };
+
+            let mut hotkey_ref: EventHotKeyRef = std::ptr::null_mut();
+            let status = RegisterEventHotKey(
+                K_VK_R,
+                CMD_KEY | CTRL_KEY,
+                hot_key_id,
+                GetEventDispatcherTarget(),
+                0,
+                &mut hotkey_ref,
+            );
+
+            if status != 0 {
+                println!("Failed to register hotkey: {}", status);
+                return false;
+            }
+
+            println!("Global hotkey Cmd+Control+R registered successfully");
+            true
         }
     }
 }
@@ -116,23 +188,21 @@ impl eframe::App for SpeedReaderApp {
             self.start_reading(ctx);
         }
 
-        // If not reading, hide window (only once) and wait
+        // If not reading, hide window and wait for hotkey
         if !self.reading_active {
             if self.window_visible {
                 ctx.send_viewport_cmd(egui::ViewportCommand::Visible(false));
                 self.window_visible = false;
-                println!("Window hidden");
             }
             ctx.request_repaint_after(Duration::from_millis(100));
             return;
         }
 
-        // Ensure window is visible during reading (only send command once)
+        // Ensure window is visible during reading
         if !self.window_visible {
             ctx.send_viewport_cmd(egui::ViewportCommand::Visible(true));
             ctx.send_viewport_cmd(egui::ViewportCommand::Focus);
             self.window_visible = true;
-            println!("Window shown");
         }
 
         // Handle keyboard input - collect actions first, then apply
@@ -141,24 +211,30 @@ impl eframe::App for SpeedReaderApp {
         let mut speed_delta: i32 = 0;
 
         ctx.input(|i| {
+            // Debug: print all events
+            if !i.events.is_empty() {
+                println!("Events received: {:?}", i.events);
+            }
+
             // Check all keys that were pressed this frame
             for event in &i.events {
                 if let egui::Event::Key { key, pressed: true, .. } = event {
+                    println!("Key event: {:?}", key);
                     match key {
                         egui::Key::Space => {
-                            println!("Space pressed");
+                            println!("Space pressed!");
                             should_toggle_pause = true;
                         }
                         egui::Key::Escape => {
-                            println!("Escape pressed");
+                            println!("Escape pressed!");
                             should_stop = true;
                         }
                         egui::Key::ArrowUp => {
-                            println!("Arrow up pressed");
+                            println!("Arrow up pressed!");
                             speed_delta += 50;
                         }
                         egui::Key::ArrowDown => {
-                            println!("Arrow down pressed");
+                            println!("Arrow down pressed!");
                             speed_delta -= 50;
                         }
                         _ => {}
@@ -167,23 +243,7 @@ impl eframe::App for SpeedReaderApp {
             }
         });
 
-        // Apply actions after input processing
-        if should_stop {
-            self.stop_reading(ctx);
-            return;
-        }
-
-        if should_toggle_pause {
-            if let Some(engine) = &mut self.engine {
-                self.paused = !self.paused;
-                if self.paused {
-                    engine.pause();
-                } else {
-                    engine.resume();
-                }
-            }
-        }
-
+        // Apply speed changes from keyboard
         if speed_delta != 0 {
             if let Some(engine) = &mut self.engine {
                 engine.adjust_speed(speed_delta);
@@ -220,38 +280,23 @@ impl eframe::App for SpeedReaderApp {
             (0.0, 0)
         };
 
-        // Main reading interface with rounded corners and border
-        egui::CentralPanel::default()
-            .frame(egui::Frame::none())  // Transparent panel background
+        // Main reading interface
+        let paused = self.paused;
+        let response = egui::CentralPanel::default()
+            .frame(egui::Frame::none().fill(bg_color).inner_margin(20.0))
             .show(ctx, |ui| {
-                // Draw rounded rect background manually for proper clipping
-                let panel_rect = ui.available_rect_before_wrap();
-                let rounding = egui::Rounding::same(16.0);
+                let mut pause_clicked = false;
+                let mut stop_clicked = false;
 
-                ui.painter().rect(
-                    panel_rect,
-                    rounding,
-                    bg_color,
-                    egui::Stroke::new(2.0, border_color),
-                );
-
-                // Content area with padding
-                let content_rect = panel_rect.shrink(24.0);
-                let mut content_ui = ui.child_ui(content_rect, egui::Layout::centered_and_justified(egui::Direction::TopDown), None);
-
-                content_ui.vertical_centered(|ui| {
-                    // Center vertically
-                    let available_h = ui.available_height();
-                    ui.add_space((available_h - 50.0) / 2.0);
+                ui.vertical_centered(|ui| {
+                    ui.add_space(20.0);
 
                     if let Some((before, focus, after)) = &word_parts {
-                        // Display word with ORP centered using a single formatted string
                         let font_size = 40.0;
 
                         ui.horizontal(|ui| {
-                            ui.add_space((ui.available_width() - 650.0).max(0.0) / 2.0);
+                            ui.add_space((ui.available_width() - 600.0).max(0.0) / 2.0);
 
-                            // Right-align "before" part
                             ui.label(
                                 egui::RichText::new(format!("{:>12}", before))
                                     .size(font_size)
@@ -259,7 +304,6 @@ impl eframe::App for SpeedReaderApp {
                                     .monospace(),
                             );
 
-                            // Focus character (highlighted)
                             ui.label(
                                 egui::RichText::new(focus.to_string())
                                     .size(font_size)
@@ -268,7 +312,6 @@ impl eframe::App for SpeedReaderApp {
                                     .strong(),
                             );
 
-                            // Left-align "after" part
                             ui.label(
                                 egui::RichText::new(format!("{:<12}", after))
                                     .size(font_size)
@@ -278,28 +321,60 @@ impl eframe::App for SpeedReaderApp {
                         });
                     }
 
-                    // Show progress and controls only when paused
-                    if self.paused {
-                        ui.add_space(15.0);
+                    ui.add_space(10.0);
 
-                        let progress_bar = egui::ProgressBar::new(progress)
-                            .desired_width(280.0)
-                            .desired_height(4.0)
-                            .fill(focus_color.linear_multiply(0.7));
-                        ui.add(progress_bar);
-
-                        ui.add_space(6.0);
-
+                    // Buttons for control
+                    ui.horizontal(|ui| {
+                        if ui.button(if paused { "▶ Resume" } else { "⏸ Pause" }).clicked() {
+                            println!("Pause button clicked!");
+                            pause_clicked = true;
+                        }
+                        if ui.button("✕ Stop").clicked() {
+                            println!("Stop button clicked!");
+                            stop_clicked = true;
+                        }
                         ui.label(
-                            egui::RichText::new(format!("{} WPM  -  PAUSED", current_wpm))
+                            egui::RichText::new(format!("{} WPM", current_wpm))
                                 .size(12.0)
-                                .color(egui::Color32::from_rgb(100, 100, 110)),
+                                .color(egui::Color32::GRAY),
                         );
+                    });
+
+                    if paused {
+                        ui.add_space(5.0);
+                        ui.add(egui::ProgressBar::new(progress).desired_width(280.0));
                     }
                 });
 
                 ctx.request_repaint();
+                (pause_clicked, stop_clicked)
             });
+
+        // Handle button clicks
+        let (pause_clicked, stop_clicked) = response.inner;
+        if pause_clicked {
+            should_toggle_pause = true;
+        }
+        if stop_clicked {
+            should_stop = true;
+        }
+
+        // Apply button actions
+        if should_stop {
+            self.stop_reading(ctx);
+            return;
+        }
+
+        if should_toggle_pause {
+            if let Some(engine) = &mut self.engine {
+                self.paused = !self.paused;
+                if self.paused {
+                    engine.pause();
+                } else {
+                    engine.resume();
+                }
+            }
+        }
     }
 }
 
@@ -320,22 +395,17 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
     // Shared flag for hotkey trigger
     let trigger_flag = Arc::new(AtomicBool::new(false));
 
-    // Set up global hotkey monitor using macOS native APIs
+    // Set up global hotkey using Carbon API (doesn't block window focus)
     #[cfg(target_os = "macos")]
-    let _monitor = hotkey::setup_global_monitor(Arc::clone(&trigger_flag));
+    hotkey::setup_global_hotkey(Arc::clone(&trigger_flag));
 
-    #[cfg(not(target_os = "macos"))]
-    println!("Warning: Global hotkeys only supported on macOS");
-
-    // Run the GUI app with wgpu backend (avoids OpenGL threading issues)
+    // Run the GUI app
     let options = eframe::NativeOptions {
-        renderer: eframe::Renderer::Wgpu,
         viewport: egui::ViewportBuilder::default()
-            .with_inner_size([700.0, 140.0])  // Wider for 25 chars + padding
+            .with_inner_size([700.0, 160.0])
             .with_decorations(false)
             .with_transparent(true)
-            .with_always_on_top()
-            .with_visible(true), // Start visible, will hide on first update
+            .with_always_on_top(),
         ..Default::default()
     };
 
