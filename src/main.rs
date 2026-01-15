@@ -5,10 +5,9 @@ use std::sync::Arc;
 use std::time::Duration;
 
 #[cfg(target_os = "macos")]
+#[allow(deprecated)]
 mod hotkey {
     use cocoa::base::{id, nil};
-    use cocoa::foundation::NSString;
-    use objc::runtime::Object;
     use objc::{class, msg_send, sel, sel_impl};
     use std::sync::atomic::{AtomicBool, Ordering};
     use std::sync::Arc;
@@ -136,132 +135,169 @@ impl eframe::App for SpeedReaderApp {
             println!("Window shown");
         }
 
-        // Handle keyboard input during reading
+        // Handle keyboard input - collect actions first, then apply
+        let mut should_toggle_pause = false;
+        let mut should_stop = false;
+        let mut speed_delta: i32 = 0;
+
         ctx.input(|i| {
-            if i.key_pressed(egui::Key::Space) {
-                if let Some(engine) = &mut self.engine {
-                    self.paused = !self.paused;
-                    if self.paused {
-                        engine.pause();
-                    } else {
-                        engine.resume();
+            // Check all keys that were pressed this frame
+            for event in &i.events {
+                if let egui::Event::Key { key, pressed: true, .. } = event {
+                    match key {
+                        egui::Key::Space => {
+                            println!("Space pressed");
+                            should_toggle_pause = true;
+                        }
+                        egui::Key::Escape => {
+                            println!("Escape pressed");
+                            should_stop = true;
+                        }
+                        egui::Key::ArrowUp => {
+                            println!("Arrow up pressed");
+                            speed_delta += 50;
+                        }
+                        egui::Key::ArrowDown => {
+                            println!("Arrow down pressed");
+                            speed_delta -= 50;
+                        }
+                        _ => {}
                     }
                 }
             }
-            if i.key_pressed(egui::Key::ArrowUp) {
-                if let Some(engine) = &mut self.engine {
-                    engine.adjust_speed(10);
-                }
-            }
-            if i.key_pressed(egui::Key::ArrowDown) {
-                if let Some(engine) = &mut self.engine {
-                    engine.adjust_speed(-10);
-                }
-            }
-            if i.key_pressed(egui::Key::Escape) {
-                self.stop_reading(ctx);
-                return;
-            }
         });
+
+        // Apply actions after input processing
+        if should_stop {
+            self.stop_reading(ctx);
+            return;
+        }
+
+        if should_toggle_pause {
+            if let Some(engine) = &mut self.engine {
+                self.paused = !self.paused;
+                if self.paused {
+                    engine.pause();
+                } else {
+                    engine.resume();
+                }
+            }
+        }
+
+        if speed_delta != 0 {
+            if let Some(engine) = &mut self.engine {
+                engine.adjust_speed(speed_delta);
+            }
+        }
 
         // Check if reading is finished
         if let Some(engine) = &self.engine {
             if engine.is_finished() {
-                // Auto-stop after finished (with small delay)
                 self.stop_reading(ctx);
                 return;
             }
         }
 
-        // Main reading interface
+        // Colors
+        let bg_color = egui::Color32::from_rgb(20, 20, 25);
+        let border_color = egui::Color32::from_rgb(60, 60, 70);
+        let text_color = egui::Color32::from_rgb(200, 200, 210);
+        let focus_color = egui::Color32::from_rgb(255, 100, 100);
+
+        // Get word data and progress before UI rendering
+        let word_parts: Option<(String, char, String)> = if let Some(engine) = &mut self.engine {
+            engine.update().map(|w| {
+                let (before, focus, after) = w.get_parts();
+                (before, focus, after)
+            })
+        } else {
+            None
+        };
+
+        let (progress, current_wpm) = if let Some(engine) = &self.engine {
+            (engine.get_progress(), engine.get_current_wpm())
+        } else {
+            (0.0, 0)
+        };
+
+        // Main reading interface with rounded corners and border
         egui::CentralPanel::default()
-            .frame(egui::Frame::none().fill(egui::Color32::BLACK))
+            .frame(egui::Frame::none())  // Transparent panel background
             .show(ctx, |ui| {
-                if let Some(engine) = &mut self.engine {
-                    // Update and display word
-                    if let Some(word) = engine.update() {
-                        let (before, focus, after) = word.get_parts();
+                // Draw rounded rect background manually for proper clipping
+                let panel_rect = ui.available_rect_before_wrap();
+                let rounding = egui::Rounding::same(16.0);
 
-                        // Center the display
-                        ui.vertical_centered(|ui| {
-                            ui.add_space(ui.available_height() / 2.0 - 30.0);
+                ui.painter().rect(
+                    panel_rect,
+                    rounding,
+                    bg_color,
+                    egui::Stroke::new(2.0, border_color),
+                );
 
-                            ui.horizontal(|ui| {
-                                // Add horizontal centering
-                                let total_width = 600.0;
-                                let side_margin = (ui.available_width() - total_width) / 2.0;
-                                ui.add_space(side_margin.max(0.0));
+                // Content area with padding
+                let content_rect = panel_rect.shrink(24.0);
+                let mut content_ui = ui.child_ui(content_rect, egui::Layout::centered_and_justified(egui::Direction::TopDown), None);
 
-                                // Display word parts with ORP alignment
-                                ui.label(
-                                    egui::RichText::new(format!("{:>20}", before))
-                                        .size(48.0)
-                                        .color(egui::Color32::LIGHT_GRAY)
-                                        .monospace(),
-                                );
+                content_ui.vertical_centered(|ui| {
+                    // Center vertically
+                    let available_h = ui.available_height();
+                    ui.add_space((available_h - 50.0) / 2.0);
 
-                                ui.label(
-                                    egui::RichText::new(focus.to_string())
-                                        .size(48.0)
-                                        .color(egui::Color32::RED)
-                                        .monospace()
-                                        .strong(),
-                                );
+                    if let Some((before, focus, after)) = &word_parts {
+                        // Display word with ORP centered using a single formatted string
+                        let font_size = 40.0;
 
-                                ui.label(
-                                    egui::RichText::new(format!("{:<20}", after))
-                                        .size(48.0)
-                                        .color(egui::Color32::LIGHT_GRAY)
-                                        .monospace(),
-                                );
-                            });
+                        ui.horizontal(|ui| {
+                            ui.add_space((ui.available_width() - 650.0).max(0.0) / 2.0);
 
-                            // Visual guide line for ORP
-                            let center_x = ui.available_width() / 2.0;
-                            let line_top = ui.cursor().top() - 60.0;
-                            let line_bottom = ui.cursor().top() + 20.0;
+                            // Right-align "before" part
+                            ui.label(
+                                egui::RichText::new(format!("{:>12}", before))
+                                    .size(font_size)
+                                    .color(text_color)
+                                    .monospace(),
+                            );
 
-                            ui.painter().line_segment(
-                                [
-                                    egui::pos2(center_x, line_top),
-                                    egui::pos2(center_x, line_bottom)
-                                ],
-                                egui::Stroke::new(1.0, egui::Color32::DARK_GRAY),
+                            // Focus character (highlighted)
+                            ui.label(
+                                egui::RichText::new(focus.to_string())
+                                    .size(font_size)
+                                    .color(focus_color)
+                                    .monospace()
+                                    .strong(),
+                            );
+
+                            // Left-align "after" part
+                            ui.label(
+                                egui::RichText::new(format!("{:<12}", after))
+                                    .size(font_size)
+                                    .color(text_color)
+                                    .monospace(),
                             );
                         });
                     }
 
-                    // Progress bar and info at bottom
-                    let progress = engine.get_progress();
-                    let current_wpm = engine.get_current_wpm();
+                    // Show progress and controls only when paused
+                    if self.paused {
+                        ui.add_space(15.0);
 
-                    ui.with_layout(egui::Layout::bottom_up(egui::Align::Center), |ui| {
-                        ui.add_space(10.0);
+                        let progress_bar = egui::ProgressBar::new(progress)
+                            .desired_width(280.0)
+                            .desired_height(4.0)
+                            .fill(focus_color.linear_multiply(0.7));
+                        ui.add(progress_bar);
 
-                        // Progress bar
-                        ui.add(
-                            egui::ProgressBar::new(progress)
-                                .desired_width(ui.available_width() * 0.8)
-                                .desired_height(4.0)
-                        );
+                        ui.add_space(6.0);
 
-                        // WPM indicator
                         ui.label(
-                            egui::RichText::new(format!("{} WPM", current_wpm))
-                                .size(16.0)
-                                .color(egui::Color32::GRAY),
-                        );
-
-                        // Controls hint
-                        ui.label(
-                            egui::RichText::new("Space: Pause | ↑↓: Speed | ESC: Stop")
+                            egui::RichText::new(format!("{} WPM  -  PAUSED", current_wpm))
                                 .size(12.0)
-                                .color(egui::Color32::DARK_GRAY),
+                                .color(egui::Color32::from_rgb(100, 100, 110)),
                         );
-                    });
-                }
+                    }
+                });
 
-                // Request continuous updates during reading
                 ctx.request_repaint();
             });
     }
@@ -295,7 +331,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
     let options = eframe::NativeOptions {
         renderer: eframe::Renderer::Wgpu,
         viewport: egui::ViewportBuilder::default()
-            .with_inner_size([900.0, 400.0])
+            .with_inner_size([700.0, 140.0])  // Wider for 25 chars + padding
             .with_decorations(false)
             .with_transparent(true)
             .with_always_on_top()

@@ -36,9 +36,9 @@ impl Default for Config {
     fn default() -> Self {
         Self {
             speed: SpeedConfig {
-                start_wpm: 200,
-                target_wpm: 400,
-                warmup_seconds: 30.0,
+                start_wpm: 300,
+                target_wpm: 500,
+                warmup_seconds: 15.0,
             },
             display: DisplayConfig {
                 font_size: 48.0,

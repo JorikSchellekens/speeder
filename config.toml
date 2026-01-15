@@ -3,9 +3,9 @@
 # Reading speed settings
 [speed]
 # Starting words per minute
-start_wpm = 200
+start_wpm = 400
 # Target words per minute
-target_wpm = 400
+target_wpm = 600
 # Time in seconds to warm up from start to target speed
 warmup_seconds = 30
 
