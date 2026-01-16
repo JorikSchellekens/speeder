@@ -12,6 +12,8 @@ egui = "0.29"
 
 # System integration
 clipboard = "0.5"
+tray-icon = "0.19"
+objc = "0.2"  # For setting activation policy (no dock icon)
 
 # Configuration
 serde = { version = "1.0", features = ["derive"] }

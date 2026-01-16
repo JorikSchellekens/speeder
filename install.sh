@@ -8,38 +8,60 @@ echo "Installing Speeder..."
 echo "Building application..."
 ./build.sh
 
-# Create symlink in /usr/local/bin for easy access
-echo "Creating command line shortcut..."
-sudo ln -sf "$(pwd)/target/release/speeder" /usr/local/bin/speeder
+# Copy app bundle to /Applications
+echo "Installing to /Applications..."
+rm -rf "/Applications/Speeder.app"
+cp -r "target/release/Speeder.app" "/Applications/"
 
-# Create desktop entry for easy launching
-DESKTOP_FILE="$HOME/Desktop/Speeder.command"
-cat > "$DESKTOP_FILE" << EOF
-#!/bin/bash
-cd "$(pwd)"
-./target/release/speeder
+# Create LaunchAgent for login startup
+LAUNCH_AGENT_DIR="$HOME/Library/LaunchAgents"
+LAUNCH_AGENT_FILE="$LAUNCH_AGENT_DIR/com.speeder.app.plist"
+
+echo "Setting up login startup..."
+mkdir -p "$LAUNCH_AGENT_DIR"
+
+cat > "$LAUNCH_AGENT_FILE" << 'EOF'
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<plist version="1.0">
+<dict>
+    <key>Label</key>
+    <string>com.speeder.app</string>
+    <key>ProgramArguments</key>
+    <array>
+        <string>/Applications/Speeder.app/Contents/MacOS/Speeder</string>
+    </array>
+    <key>RunAtLoad</key>
+    <true/>
+    <key>KeepAlive</key>
+    <false/>
+</dict>
+</plist>
 EOF
-chmod +x "$DESKTOP_FILE"
+
+# Load the LaunchAgent (start now if not already running)
+launchctl unload "$LAUNCH_AGENT_FILE" 2>/dev/null || true
+launchctl load "$LAUNCH_AGENT_FILE"
 
 echo ""
 echo "Installation complete!"
 echo ""
-echo "You can now run Speeder in several ways:"
-echo "  1. From terminal: speeder"
-echo "  2. Double-click Speeder.command on your Desktop"
-echo "  3. Run directly: ./target/release/speeder"
+echo "Speeder is now:"
+echo "  - Installed at /Applications/Speeder.app"
+echo "  - Set to start automatically at login"
+echo "  - Running in the menubar (look for 'Speeder' text)"
 echo ""
 echo "Usage:"
-echo "  - Copy text to clipboard (or select text)"
+echo "  - Select text in any app (or copy to clipboard)"
 echo "  - Press Cmd+Control+R to start reading"
-echo "  - Press Space to pause/resume"
-echo "  - Press Up/Down arrows to adjust speed"
-echo "  - Press Left/Right arrows to navigate"
-echo "  - Press R to restart"
-echo "  - Press Escape to stop reading"
-echo ""
-echo "Configuration file: ~/Library/Application Support/speeder/config.toml"
+echo "  - Space to pause/resume"
+echo "  - Up/Down arrows to adjust speed"
+echo "  - Left/Right arrows to navigate"
+echo "  - R to restart"
+echo "  - Escape to stop"
 echo ""
 echo "To uninstall:"
-echo "  sudo rm /usr/local/bin/speeder"
-echo "  rm ~/Desktop/Speeder.command"
+echo "  launchctl unload ~/Library/LaunchAgents/com.speeder.app.plist"
+echo "  rm ~/Library/LaunchAgents/com.speeder.app.plist"
+echo "  rm -rf /Applications/Speeder.app"
+echo "  rm -rf ~/Library/Application\\ Support/speeder"

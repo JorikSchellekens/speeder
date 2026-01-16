@@ -1,8 +1,80 @@
+// Silence warnings from objc crate macros
+#![allow(unexpected_cfgs)]
+
 use eframe::egui;
 use clipboard::{ClipboardContext, ClipboardProvider};
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::Arc;
 use std::time::Duration;
+
+#[cfg(target_os = "macos")]
+use tray_icon::{TrayIconBuilder, menu::{Menu, MenuItem, PredefinedMenuItem}};
+
+#[cfg(target_os = "macos")]
+mod macos_utils {
+    use objc::{msg_send, sel, sel_impl, class, runtime::Object};
+
+    /// Set app to accessory mode - no dock icon, no cmd-tab entry
+    pub fn set_accessory_app() {
+        unsafe {
+            let app: *mut Object = msg_send![class!(NSApplication), sharedApplication];
+            // NSApplicationActivationPolicyAccessory = 1
+            let _: () = msg_send![app, setActivationPolicy: 1i64];
+        }
+    }
+
+    /// Get the center position for a window on the screen containing the mouse cursor
+    /// Returns (x, y) position for centering a window of given size
+    pub fn get_centered_position_on_mouse_screen(window_width: f32, window_height: f32) -> (f32, f32) {
+        unsafe {
+            // Get mouse location (in screen coordinates, origin bottom-left)
+            let mouse_loc: (f64, f64) = msg_send![class!(NSEvent), mouseLocation];
+
+            // Get all screens
+            let screens: *mut Object = msg_send![class!(NSScreen), screens];
+            let count: usize = msg_send![screens, count];
+
+            // Find screen containing mouse
+            for i in 0..count {
+                let screen: *mut Object = msg_send![screens, objectAtIndex: i];
+                let frame: ((f64, f64), (f64, f64)) = msg_send![screen, frame];
+                let ((x, y), (w, h)) = frame;
+
+                // Check if mouse is in this screen (bottom-left origin)
+                if mouse_loc.0 >= x && mouse_loc.0 < x + w &&
+                   mouse_loc.1 >= y && mouse_loc.1 < y + h {
+                    // Calculate center position for window
+                    // Note: macOS uses bottom-left origin, but egui uses top-left
+                    // We need to convert: top_y = screen_height - bottom_y - window_height
+                    let center_x = x + (w - window_width as f64) / 2.0;
+                    let center_y = y + (h - window_height as f64) / 2.0;
+
+                    // Convert to top-left origin for egui
+                    // Get main screen height for coordinate conversion
+                    let main_screen: *mut Object = msg_send![class!(NSScreen), mainScreen];
+                    let main_frame: ((f64, f64), (f64, f64)) = msg_send![main_screen, frame];
+                    let main_height = main_frame.1.1;
+
+                    let top_left_y = main_height - center_y - window_height as f64;
+
+                    return (center_x as f32, top_left_y as f32);
+                }
+            }
+
+            // Fallback to primary screen center
+            let main_screen: *mut Object = msg_send![class!(NSScreen), mainScreen];
+            let frame: ((f64, f64), (f64, f64)) = msg_send![main_screen, frame];
+            let ((x, y), (w, h)) = frame;
+            let center_x = x + (w - window_width as f64) / 2.0;
+            let center_y = y + (h - window_height as f64) / 2.0;
+
+            let main_height = h;
+            let top_left_y = main_height - center_y - window_height as f64;
+
+            (center_x as f32, top_left_y as f32)
+        }
+    }
+}
 
 #[cfg(target_os = "macos")]
 mod hotkey {
@@ -279,6 +351,12 @@ impl eframe::App for SpeedReaderApp {
 
         // Ensure window is visible during reading
         if !self.window_visible {
+            // Position window centered on the screen containing the mouse cursor
+            #[cfg(target_os = "macos")]
+            {
+                let (x, y) = macos_utils::get_centered_position_on_mouse_screen(700.0, 90.0);
+                ctx.send_viewport_cmd(egui::ViewportCommand::OuterPosition(egui::pos2(x, y)));
+            }
             ctx.send_viewport_cmd(egui::ViewportCommand::Visible(true));
             ctx.send_viewport_cmd(egui::ViewportCommand::Focus);
             self.window_visible = true;
@@ -489,10 +567,43 @@ impl eframe::App for SpeedReaderApp {
 fn main() -> Result<(), Box<dyn std::error::Error>> {
     env_logger::init();
 
+    // Set app to accessory mode (no dock icon, no cmd-tab)
+    #[cfg(target_os = "macos")]
+    macos_utils::set_accessory_app();
+
     // Load configuration
     let config = Config::load().unwrap_or_default();
 
-    println!("Speeder - Cmd+Control+R to start, ESC to stop");
+    // Create menubar tray icon
+    #[cfg(target_os = "macos")]
+    let _tray_icon = {
+        let menu = Menu::new();
+        let _ = menu.append(&MenuItem::with_id("status", "Cmd+Ctrl+R to read", false, None));
+        let _ = menu.append(&PredefinedMenuItem::separator());
+        let _ = menu.append(&MenuItem::with_id("quit", "Quit Speeder", true, None));
+
+        TrayIconBuilder::new()
+            .with_menu(Box::new(menu))
+            .with_tooltip("Speeder - Speed Reader")
+            .with_title("Speeder")  // macOS menubar text
+            .build()
+            .expect("Failed to create tray icon")
+    };
+
+    // Handle tray menu events in a separate thread
+    #[cfg(target_os = "macos")]
+    {
+        use tray_icon::menu::MenuEvent;
+        std::thread::spawn(|| {
+            loop {
+                if let Ok(event) = MenuEvent::receiver().recv() {
+                    if event.id.0 == "quit" {
+                        std::process::exit(0);
+                    }
+                }
+            }
+        });
+    }
 
     // Shared flag for hotkey trigger
     let trigger_flag = Arc::new(AtomicBool::new(false));
