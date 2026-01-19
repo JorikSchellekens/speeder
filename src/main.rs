@@ -274,6 +274,9 @@ impl SpeedReaderApp {
     }
 
     fn start_reading(&mut self, _ctx: &egui::Context) {
+        // Small delay to ensure focus hasn't shifted to our app yet
+        std::thread::sleep(Duration::from_millis(50));
+
         // Simulate Cmd+C to copy any selected text
         #[cfg(target_os = "macos")]
         hotkey::simulate_copy();
@@ -412,6 +415,8 @@ impl eframe::App for SpeedReaderApp {
         // Check if reading is finished
         if let Some(engine) = &self.engine {
             if engine.is_finished() {
+                // Reset position so next time starts from beginning
+                self.last_position = 0;
                 self.stop_reading(ctx);
                 return;
             }
